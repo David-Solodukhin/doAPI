@@ -103,11 +103,12 @@ app.get('/:tokenstring', function (request, response, next) {
         console.log(err);
         });
         //whenever each of the following is called, the offset number resets.
-    } else if (apiCode.includes("sortpop")) { //sortPop&page=&time=
+    } else if (apiCode.includes("sortpop")) { //sortPop&page=&time=&uni=
         pre = apiCode.substring(8).split("&");
         var offset = pre[0].substring(pre[0].indexOf("=")+1) * 5; //5 is how many events displayed per page
         time = pre[1].substring(pre[1].indexOf("=")+1);
-        var testQuery = connection.query('select * from events where (((maybe * .05) + going) / views) > 0.5 AND ABS(time - ?) < 300 ORDER BY views DESC, time DESC LIMIT ?, 5', [ time, offset ], function (err, result) {
+        uni = pre[2].substring(pre[2].indexOf("=")+1);
+        var testQuery = connection.query('select * from events where (((maybe * .05) + going) / views) > 0.5 AND ABS(time - ?) < 300 AND uni = ? ORDER BY views DESC, time DESC LIMIT ?, 5', [ time, uni, offset ], function (err, result) {
             //console.log(testQuery);
             console.log(result[0]);
             //response.render('index', {val: err});
@@ -121,8 +122,19 @@ app.get('/:tokenstring', function (request, response, next) {
         //figure out popularity and return some rows in a json object
     } else if (apiCode.includes("sorttag")) {
         //return 5 rows that fit the tag and are popular
-    } else if (apiCode.includes("sorttime")) {
+    } else if (apiCode.includes("sorttime")) { //sorttime&page=&time=&uni=
         //return 5 rows that are the newest; sort by time
+        time = apiCode.substring(apiCode.indexOf("&time")+6,apiCode.indexOf("&",apiCode.indexOf("&time")+6 )!=-1 ? apiCode.indexOf("&", apiCode.indexOf("&time")+6): apiCode.length );
+        uni = apiCode.substring(apiCode.indexOf("&uni")+5,apiCode.indexOf("&",apiCode.indexOf("&uni")+5 )!=-1 ? apiCode.indexOf("&", apiCode.indexOf("&uni")+5): apiCode.length );
+        offset = apiCode.substring(apiCode.indexOf("&page")+6,apiCode.indexOf("&",apiCode.indexOf("&page")+6 )!=-1 ? apiCode.indexOf("&", apiCode.indexOf("&page")+6): apiCode.length ) * 5;
+            var testQuery2 = connection.query("select * from events where uni = ? AND ABS(time - ?) < 2000 ORDER BY time DESC LIMIT ?, 5", [ uni, time, offset ], function (err, result) {
+            console.log(err);
+            //console.log(result[0]);
+            //response.render('index', {val: err});
+            var json = JSON.stringify(result);
+            response.json(result);
+            //console.log(json);
+        });
     }
 });
 // catch 404 and forward to error handler
