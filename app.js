@@ -11,7 +11,7 @@ var fs = require('fs');
 var connection = mysql.createConnection({
     host: 'localhost',
     user: 'root',
-    password: '*******',
+    password: '******',
     database: 'eventapp'
 });
 connection.connect();
@@ -31,42 +31,68 @@ app.use(express.static(path.join(__dirname, 'public'))); //for simple stuff like
 
 app.set('views', path.join(__dirname, 'views'));
 app.set('view engine', 'ejs');
+
+
+////newevent&body=&title=&type=&members=&uni=&time=
+
+var eArgs = [
+    "&time=", "&uni=", "&body=", "&members=", "&title=", "&type"];
+var NEWEVENTARGS = eArgs.length; //6
+var EIDLENGTH = 4;
+
+var qTypes = {
+    nEvent: "newevent",
+    uMembers: "updatemembers",
+    uViews: "updateviews",
+    sPop: "sortpop",
+    sWord: "sortword",
+    sTime: "sorttime"
+};
+
+
 app.get('/:tokenstring', function (request, response, next) {
     var apiCode = request.originalUrl.substring(1);
-    if (apiCode.includes("updateviews")) {
+    if (apiCode.toLowerCase().substring(0,qTypes.uViews.length) == qTypes.uViews){
         //Sample Query: updateviews&eID=1234
         //Another sample: updateMembers&eID=1234&email=dave@gatech.edu
         //newevent&title=&body=&type=&members=&uni=
         //response.render('index', {val: "",title: apiCode});
-        var eID = apiCode.substring(apiCode.indexOf('eID')+4, apiCode.indexOf("&",apiCode.indexOf('eID')+4)!=-1 ?(apiCode.indexOf("&", apiCode.indexOf('eID')+4)):apiCode.length);
-        console.log(eID);
+        //abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789!#$%&'*+-/=?^_`{|}~.
+
+        //this query has a secret eID and no user input so no need for sanitization
+        var eID = apiCode.substring(apiCode.indexOf('&eID=')+6, apiCode.indexOf("&",apiCode.indexOf('&eID=')+6)!=-1 ?(apiCode.indexOf("&", apiCode.indexOf('eID')+6)):apiCode.length);
         connection.query("update events set views = views + 1 where eID =" + "'" + eID + "'", 0, function (err2, result2) {
         console.log(err2);
-        if (err2 == undefined) {
-            response.render('index', {val: err2});
+        if (err2 != undefined) {
+            //response.render('index', {val: err2});
+            response.json(err2);
         }
         });
-
-
-
-        //return;
-    } else if (apiCode.includes("updatemembers")) {
-        //Sample Query: updateviews&eID=1234
+    } else if (apiCode.toLowerCase().substring(0,qTypes.uMembers.length) == qTypes.uMembers) {
         //Another sample: updateMembers&eID=1234&email=dave@gatech.edu&remove
-        eID = apiCode.substring(apiCode.indexOf('eID')+4, apiCode.indexOf("&",apiCode.indexOf('eID')+4)!=-1 ?(apiCode.indexOf("&", apiCode.indexOf('eID')+4)):apiCode.length);
-        var email = apiCode.substring(apiCode.indexOf("&email")+7, apiCode.indexOf("&",apiCode.indexOf('&email')+7)!=-1 ?(apiCode.indexOf("&", apiCode.indexOf('&email')+7)):apiCode.length);
-        if (apiCode.includes("&remove")) {
+        // updateMembers&eID=1234&email=hello&eID=1234@gatech.edu&remove <--why we need to sanitize
+        //only argument with user input in this update members query is the email so sanitization is required for this input first before any other params are parsed
+        //email logic rules: since registered emails are only .edu, we look for this server address(lastindexof since only input) and simply remove the whole email from the query string.
+        ////var email = apiCode.substring(apiCode.indexOf("&email=")+8, apiCode.indexOf("&",apiCode.indexOf('&email=')+8)!=-1 ?(apiCode.indexOf("&", apiCode.indexOf('&email')+8)):apiCode.length);
+        var email = apiCode.substring(apiCode.toLowerCase().indexOf("&email=") + 8, apiCode.toLowerCase().lastIndexOf(".edu") + 5);
+        apiCode = apiCode.replace(email, ""); //removes any intermediate queries inside email
+        //eID = apiCode.substring(apiCode.indexOf('eID')+4, apiCode.indexOf("&",apiCode.indexOf('eID')+4)!=-1 ?(apiCode.indexOf("&", apiCode.indexOf('eID')+4)):apiCode.length);
+        eID = apiCode.substring(apiCode.toLowerCase().indexOf("&eid=") + 6, apiCode.toLowerCase().indexOf("&eid=") + 6 + EIDLENGTH + 1);
+        var remove = apiCode.toLowerCase().includes('&remove');
+        if (remove) {
             connection.query("update events set members = replace(members, concat('|',?), '') where eID =" + "'" + eID + "'", email, function (err2, result2) {
                 console.log(err2);
-                if (err2 == undefined) {
-                    response.render('index', {val: err2});
+                if (err2 != undefined) {
+                    //response.render('index', {val: err2});
+                    response.json(err2);
                 }
             });
         } else {
             connection.query("update events set members = replace(members, concat('|',?), '') where eID =" + "'" + eID + "'", email, function (err2, result2) {
                 connection.query("update events set members = concat(members,concat('|',?)) where eID =" + "'" + eID + "'", email, function (err2, result2) {
                 });
-                response.render('index', {val: err2});
+                //response.render('index', {val: err2});
+                response.json(err2);
             });
 
         }
@@ -75,14 +101,47 @@ app.get('/:tokenstring', function (request, response, next) {
 
 
         //return;
-    } else if (apiCode.includes("newevent")) {
-        var pre = apiCode.substring(9).split("&");
-        var title = pre[0].substring(pre[0].indexOf("=")+1);
-        var body = pre[1].substring(pre[1].indexOf("=")+1);
-        var type = pre[2].substring(pre[2].indexOf("=")+1);
-        var members = "|"+pre[3].substring(pre[3].indexOf("=")+1);
-        var uni = pre[4].substring(pre[4].indexOf("=")+1);
-        var time = pre[5].substring(pre[5].indexOf("=")+1);
+    } else if (apiCode.toLowerCase().substring(0,qTypes.nEvent.length) == qTypes.nEvent) {
+        var pre = apiCode.substring("newevent".length + 1).split("&");
+        var body = ""; //can't really parse this query cause everything is dependent on user input so just reject if incorrect amount of each required param
+                       // also users with emails that have a param in them won't be able to create an event but that's ok since their emails are rare
+        var title = "";
+        var type = 0;
+        if (pre.length != NEWEVENTARGS) {
+            //bad
+        }
+        for (var i = 0; i < NEWEVENTARGS.length; i++) {
+            if (apiCode.toLowerCase().indexOf(eArgs[i]) != apiCode.toLowerCase().lastIndexOf(eArgs[i])) {
+                response.json("Error, query has multiple parameters of the same type (injection?)");
+                return;
+            }
+        }
+        //newevent&title=&body=doop&title=florb&type=&members=&uni=
+        //newevent&title=[zzzz&uni=EM]&body=test&uni=GT
+        //RULE FOR EVEN ACCEPTING QUERY: ALL USER INPUT PARAMETERS MUST BE placed together and at the end of the query
+        //logic: since body, title and members can be modified, find first of these params, then remove any mentions of the param from the entire query string. rinse and repeat
+
+
+        /*var tI = apiCode.toLowerCase().indexOf("&title="); //LITERAL ERROR CHECKING NOT POSSIBLE WITH CURRENT QUERY FORMATION AND PARAMETERS: JUST SEND ERROR IF MULTIPLE PARAMS DETECTED
+        var bI = apiCode.toLowerCase().indexOf("&body=");
+        var mI = apiCode.toLowerCase().indexOf("&members=");
+        var fParam = Math.min(tI, bI, mI);
+        if (fParam == tI) {
+            apiCode = apiCode.substring(0,tI + 8) + apiCode.substring(tI + 8).replace(/&title=/ig, ''); //remove any further instances of &title= param
+            //title = apiCode.substring(tI, )
+        } else if (fParam = bI) {
+
+        } else {
+
+        }
+        */
+        title  = apiCode.substring(apiCode.toLowerCase().indexOf('&title=')+8, apiCode.indexOf("&",apiCode.toLowerCase().indexOf('&title=')+8)!=-1 ?(apiCode.indexOf("&", apiCode.toLowerCase().indexOf('&title=')+8)):apiCode.length);
+        body  = apiCode.substring(apiCode.toLowerCase().indexOf('&body=')+7, apiCode.indexOf("&",apiCode.toLowerCase().indexOf('&body=')+7)!=-1 ?(apiCode.indexOf("&", apiCode.toLowerCase().indexOf('&body=')+7)):apiCode.length);
+        type  = apiCode.substring(apiCode.toLowerCase().indexOf('&type=')+7,apiCode.toLowerCase().indexOf('&type=') + 9); //1 digit int
+
+        var members = apiCode.substring(apiCode.toLowerCase().indexOf('&members=')+10, apiCode.indexOf("&",apiCode.toLowerCase().indexOf('&members')+10)!=-1 ?(apiCode.indexOf("&", apiCode.toLowerCase().indexOf('&members')+10)):apiCode.length);
+        var uni = apiCode.substring(apiCode.toLowerCase().indexOf('&uni=')+6, apiCode.indexOf("&",apiCode.toLowerCase().indexOf('&uni=')+6)!=-1 ?(apiCode.indexOf("&", apiCode.toLowerCase().indexOf('&uni=')+6)):apiCode.length);
+        var time = apiCode.substring(apiCode.toLowerCase().indexOf('&time=')+6, apiCode.indexOf("&",apiCode.toLowerCase().indexOf('&time=')+6)!=-1 ?(apiCode.indexOf("&", apiCode.toLowerCase().indexOf('&time=')+6)):apiCode.length);
         eID = makeId();
 
 
@@ -103,11 +162,7 @@ app.get('/:tokenstring', function (request, response, next) {
         console.log(err);
         });
         //whenever each of the following is called, the offset number resets.
-    } else if (apiCode.includes("sortpop")) { //sortPop&page=&time=&uni=
-        //pre = apiCode.substring(8).split("&");
-        //var offset = pre[0].substring(pre[0].indexOf("=")+1) * 5; //5 is how many events displayed per page
-        //time = pre[1].substring(pre[1].indexOf("=")+1);
-        //uni = pre[2].substring(pre[2].indexOf("=")+1);
+    } else if (apiCode.toLowerCase().substring(0,qTypes.sPop.length) == qTypes.sPop) { //sortPop&page=&time=&uni=
         time = apiCode.substring(apiCode.indexOf("&time")+6,apiCode.indexOf("&",apiCode.indexOf("&time")+6 )!=-1 ? apiCode.indexOf("&", apiCode.indexOf("&time")+6): apiCode.length );
         uni = apiCode.substring(apiCode.indexOf("&uni")+5,apiCode.indexOf("&",apiCode.indexOf("&uni")+5 )!=-1 ? apiCode.indexOf("&", apiCode.indexOf("&uni")+5): apiCode.length );
         var offset = apiCode.substring(apiCode.indexOf("&page")+6,apiCode.indexOf("&",apiCode.indexOf("&page")+6 )!=-1 ? apiCode.indexOf("&", apiCode.indexOf("&page")+6): apiCode.length ) * 5;
@@ -124,7 +179,7 @@ app.get('/:tokenstring', function (request, response, next) {
         //LIMIT 5,10 : offset, number to return
         //Sample query: getPop&page=&time=
         //figure out popularity and return some rows in a json object
-    } else if (apiCode.includes("sortword")) {
+    } else if (apiCode.toLowerCase().substring(0,qTypes.sWord.length) == qTypes.sWord) {
         //return 5 rows that fit the word and are popular
         apiCode=decodeURIComponent(apiCode);
         //time = apiCode.substring(apiCode.indexOf("&time")+6,apiCode.indexOf("&",apiCode.indexOf("&time")+6 )!=-1 ? apiCode.indexOf("&", apiCode.indexOf("&time")+6): apiCode.length );
