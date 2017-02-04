@@ -32,13 +32,10 @@ app.use(express.static(path.join(__dirname, 'public'))); //for simple stuff like
 app.set('views', path.join(__dirname, 'views'));
 app.set('view engine', 'ejs');
 
-
-////newevent&body=&title=&type=&members=&uni=&time=
-
 var eArgs = [
     "&time=", "&uni=", "&body=", "&members=", "&title=", "&type"];
 var NEWEVENTARGS = eArgs.length; //6
-var EIDLENGTH = 4;
+var EIDLENGTH = 5;
 
 var qTypes = {
     nEvent: "newevent",
@@ -52,6 +49,7 @@ var qTypes = {
 
 app.get('/:tokenstring', function (request, response, next) {
     var apiCode = request.originalUrl.substring(1);
+    apiCode = decodeURIComponent(apiCode);
     if (apiCode.toLowerCase().substring(0,qTypes.uViews.length) == qTypes.uViews){
         //Sample Query: updateviews&eID=1234
         //Another sample: updateMembers&eID=1234&email=dave@gatech.edu
@@ -60,13 +58,10 @@ app.get('/:tokenstring', function (request, response, next) {
         //abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789!#$%&'*+-/=?^_`{|}~.
 
         //this query has a secret eID and no user input so no need for sanitization
-        var eID = apiCode.substring(apiCode.indexOf('&eID=')+6, apiCode.indexOf("&",apiCode.indexOf('&eID=')+6)!=-1 ?(apiCode.indexOf("&", apiCode.indexOf('eID')+6)):apiCode.length);
-        connection.query("update events set views = views + 1 where eID =" + "'" + eID + "'", 0, function (err2, result2) {
+        var eID = apiCode.substring(apiCode.toLowerCase().indexOf('&eid=')+5,apiCode.toLowerCase().indexOf('&eid=')+5 + EIDLENGTH + 1);
+        var uQuery = connection.query("update events set views = views + 1 where eID =" + "'" + eID + "'", 0, function (err2, result2) {
         console.log(err2);
-        if (err2 != undefined) {
-            //response.render('index', {val: err2});
-            response.json(err2);
-        }
+            response.json({errors: err2, SQL: uQuery.sql});
         });
     } else if (apiCode.toLowerCase().substring(0,qTypes.uMembers.length) == qTypes.uMembers) {
         //Another sample: updateMembers&eID=1234&email=dave@gatech.edu&remove
@@ -74,25 +69,30 @@ app.get('/:tokenstring', function (request, response, next) {
         //only argument with user input in this update members query is the email so sanitization is required for this input first before any other params are parsed
         //email logic rules: since registered emails are only .edu, we look for this server address(lastindexof since only input) and simply remove the whole email from the query string.
         ////var email = apiCode.substring(apiCode.indexOf("&email=")+8, apiCode.indexOf("&",apiCode.indexOf('&email=')+8)!=-1 ?(apiCode.indexOf("&", apiCode.indexOf('&email')+8)):apiCode.length);
-        var email = apiCode.substring(apiCode.toLowerCase().indexOf("&email=") + 8, apiCode.toLowerCase().lastIndexOf(".edu") + 5);
+        var email = apiCode.substring(apiCode.toLowerCase().indexOf("&email=") + 7, apiCode.toLowerCase().lastIndexOf(".edu") + 4);
         apiCode = apiCode.replace(email, ""); //removes any intermediate queries inside email
-        //eID = apiCode.substring(apiCode.indexOf('eID')+4, apiCode.indexOf("&",apiCode.indexOf('eID')+4)!=-1 ?(apiCode.indexOf("&", apiCode.indexOf('eID')+4)):apiCode.length);
-        eID = apiCode.substring(apiCode.toLowerCase().indexOf("&eid=") + 6, apiCode.toLowerCase().indexOf("&eid=") + 6 + EIDLENGTH + 1);
+        eID = apiCode.substring(apiCode.toLowerCase().indexOf("&eid=") + 5, apiCode.toLowerCase().indexOf("&eid=") + 5 + EIDLENGTH + 1);
+        if (apiCode.toLowerCase().indexOf("&eid=") ==  -1) {
+            response.json("missing event identifier");
+            return;
+        }
+        if (apiCode.toLowerCase().indexOf("&email=") == -1 || email == "") {
+            response.json("invalid email");
+            return;
+        }
+
+
         var remove = apiCode.toLowerCase().includes('&remove');
         if (remove) {
-            connection.query("update events set members = replace(members, concat('|',?), '') where eID =" + "'" + eID + "'", email, function (err2, result2) {
+            uQuery = connection.query("update events set members = replace(members, concat('|',?), '') where eID =" + "'" + eID + "'", email, function (err2, result2) {
                 console.log(err2);
-                if (err2 != undefined) {
-                    //response.render('index', {val: err2});
-                    response.json(err2);
-                }
+                response.json({errors: err2, SQL: uQuery.sql});
             });
         } else {
             connection.query("update events set members = replace(members, concat('|',?), '') where eID =" + "'" + eID + "'", email, function (err2, result2) {
-                connection.query("update events set members = concat(members,concat('|',?)) where eID =" + "'" + eID + "'", email, function (err2, result2) {
+                uQuery = connection.query("update events set members = concat(members,concat('|',?)) where eID =" + "'" + eID + "'", email, function (err2, result2) {
                 });
-                //response.render('index', {val: err2});
-                response.json(err2);
+                response.json({errors: err2, SQL: uQuery.sql});
             });
 
         }
@@ -110,9 +110,9 @@ app.get('/:tokenstring', function (request, response, next) {
         if (pre.length != NEWEVENTARGS) {
             //bad
         }
-        for (var i = 0; i < NEWEVENTARGS.length; i++) {
-            if (apiCode.toLowerCase().indexOf(eArgs[i]) != apiCode.toLowerCase().lastIndexOf(eArgs[i])) {
-                response.json("Error, query has multiple parameters of the same type (injection?)");
+        for (var i = 0; i < NEWEVENTARGS; i++) {
+            if (apiCode.toLowerCase().indexOf(eArgs[i]) != apiCode.toLowerCase().lastIndexOf(eArgs[i]) || apiCode.toLowerCase().indexOf(eArgs[i])== -1 ) {
+                response.json("Error, query has multiple parameters of the same type, incorrect data type, (or missing required param): " + eArgs[i]);
                 return;
             }
         }
@@ -135,13 +135,14 @@ app.get('/:tokenstring', function (request, response, next) {
 
         }
         */
-        title  = apiCode.substring(apiCode.toLowerCase().indexOf('&title=')+8, apiCode.indexOf("&",apiCode.toLowerCase().indexOf('&title=')+8)!=-1 ?(apiCode.indexOf("&", apiCode.toLowerCase().indexOf('&title=')+8)):apiCode.length);
-        body  = apiCode.substring(apiCode.toLowerCase().indexOf('&body=')+7, apiCode.indexOf("&",apiCode.toLowerCase().indexOf('&body=')+7)!=-1 ?(apiCode.indexOf("&", apiCode.toLowerCase().indexOf('&body=')+7)):apiCode.length);
-        type  = apiCode.substring(apiCode.toLowerCase().indexOf('&type=')+7,apiCode.toLowerCase().indexOf('&type=') + 9); //1 digit int
+        title  = apiCode.substring(apiCode.toLowerCase().indexOf('&title=')+7, apiCode.indexOf("&",apiCode.toLowerCase().indexOf('&title=')+7)!=-1 ?(apiCode.indexOf("&", apiCode.toLowerCase().indexOf('&title=')+7)):apiCode.length);
+        body  = apiCode.substring(apiCode.toLowerCase().indexOf('&body=')+6, apiCode.indexOf("&",apiCode.toLowerCase().indexOf('&body=')+6)!=-1 ?(apiCode.indexOf("&", apiCode.toLowerCase().indexOf('&body=')+6)):apiCode.length);
+        type  = apiCode.substring(apiCode.toLowerCase().indexOf('&type=')+6,apiCode.toLowerCase().indexOf('&type=') + 7); //1 digit int
 
-        var members = apiCode.substring(apiCode.toLowerCase().indexOf('&members=')+10, apiCode.indexOf("&",apiCode.toLowerCase().indexOf('&members')+10)!=-1 ?(apiCode.indexOf("&", apiCode.toLowerCase().indexOf('&members')+10)):apiCode.length);
-        var uni = apiCode.substring(apiCode.toLowerCase().indexOf('&uni=')+6, apiCode.indexOf("&",apiCode.toLowerCase().indexOf('&uni=')+6)!=-1 ?(apiCode.indexOf("&", apiCode.toLowerCase().indexOf('&uni=')+6)):apiCode.length);
+        var members = apiCode.substring(apiCode.toLowerCase().indexOf('&members=')+9, apiCode.indexOf("&",apiCode.toLowerCase().indexOf('&members')+9)!=-1 ?(apiCode.indexOf("&", apiCode.toLowerCase().indexOf('&members')+9)):apiCode.length);
+        var uni = apiCode.substring(apiCode.toLowerCase().indexOf('&uni=')+5, apiCode.indexOf("&",apiCode.toLowerCase().indexOf('&uni=')+5)!=-1 ?(apiCode.indexOf("&", apiCode.toLowerCase().indexOf('&uni=')+5)):apiCode.length);
         var time = apiCode.substring(apiCode.toLowerCase().indexOf('&time=')+6, apiCode.indexOf("&",apiCode.toLowerCase().indexOf('&time=')+6)!=-1 ?(apiCode.indexOf("&", apiCode.toLowerCase().indexOf('&time=')+6)):apiCode.length);
+        time = time.substring(0,5); //make sure time is only 4 digits for now
         eID = makeId();
 
 
@@ -158,20 +159,31 @@ app.get('/:tokenstring', function (request, response, next) {
             maybe: 0
         };
 
-        connection.query('insert into events set ?', event, function (err, result) {
-        console.log(err);
+        var iQuery = connection.query('insert into events set ?', event, function (err, result) {
+       // console.log(err);
+       // console.log(iQuery.sql);
+        response.json({errors: err, SQL: iQuery.sql});
         });
         //whenever each of the following is called, the offset number resets.
     } else if (apiCode.toLowerCase().substring(0,qTypes.sPop.length) == qTypes.sPop) { //sortPop&page=&time=&uni=
-        time = apiCode.substring(apiCode.indexOf("&time")+6,apiCode.indexOf("&",apiCode.indexOf("&time")+6 )!=-1 ? apiCode.indexOf("&", apiCode.indexOf("&time")+6): apiCode.length );
-        uni = apiCode.substring(apiCode.indexOf("&uni")+5,apiCode.indexOf("&",apiCode.indexOf("&uni")+5 )!=-1 ? apiCode.indexOf("&", apiCode.indexOf("&uni")+5): apiCode.length );
-        var offset = apiCode.substring(apiCode.indexOf("&page")+6,apiCode.indexOf("&",apiCode.indexOf("&page")+6 )!=-1 ? apiCode.indexOf("&", apiCode.indexOf("&page")+6): apiCode.length ) * 5;
-
+        time = apiCode.substring(apiCode.indexOf("&time=")+6,apiCode.indexOf("&",apiCode.indexOf("&time=")+6 )!=-1 ? apiCode.indexOf("&", apiCode.indexOf("&time=")+6): apiCode.length );
+        uni = apiCode.substring(apiCode.indexOf("&uni=")+5,apiCode.indexOf("&",apiCode.indexOf("&uni=")+5 )!=-1 ? apiCode.indexOf("&", apiCode.indexOf("&uni=")+5): apiCode.length );
+        var offset = apiCode.substring(apiCode.indexOf("&page=")+6,apiCode.indexOf("&",apiCode.indexOf("&page=")+6 )!=-1 ? apiCode.indexOf("&", apiCode.indexOf("&page=")+6): apiCode.length ) * 5;
+        if (apiCode.toLowerCase().indexOf("&page=") == -1) {
+            offset = 0;
+        }
+        if (apiCode.toLowerCase().indexOf("&time=") == -1) {
+            response.json("missing time parameter for sort by popularity");
+            return;
+        }
+        if (apiCode.toLowerCase().indexOf("&uni=") == -1) {
+            response.json("missing uni parameter for sort by popularity");
+            return;
+        }
         var testQuery = connection.query('select * from events where (((maybe * .05) + going) / views) > 0.5 AND ABS(time - ?) < 300 AND uni = ? ORDER BY views DESC, time DESC LIMIT ?, 5', [ time, uni, offset ], function (err, result) {
             //console.log(testQuery);
             console.log(result[0]);
             //response.render('index', {val: err});
-            var json = JSON.stringify(result);
             response.json(result);
             //console.log(json);
         });
@@ -180,26 +192,42 @@ app.get('/:tokenstring', function (request, response, next) {
         //Sample query: getPop&page=&time=
         //figure out popularity and return some rows in a json object
     } else if (apiCode.toLowerCase().substring(0,qTypes.sWord.length) == qTypes.sWord) {
-        //return 5 rows that fit the word and are popular
-        apiCode=decodeURIComponent(apiCode);
-        //time = apiCode.substring(apiCode.indexOf("&time")+6,apiCode.indexOf("&",apiCode.indexOf("&time")+6 )!=-1 ? apiCode.indexOf("&", apiCode.indexOf("&time")+6): apiCode.length );
-        uni = apiCode.substring(apiCode.indexOf("&uni")+5,apiCode.indexOf("&",apiCode.indexOf("&uni")+5 )!=-1 ? apiCode.indexOf("&", apiCode.indexOf("&uni")+5): apiCode.length );
-        offset = apiCode.substring(apiCode.indexOf("&page")+6,apiCode.indexOf("&",apiCode.indexOf("&page")+6 )!=-1 ? apiCode.indexOf("&", apiCode.indexOf("&page")+6): apiCode.length ) * 5;
-        var keyWord = '%'+apiCode.substring(apiCode.indexOf("&word")+6,apiCode.indexOf("&",apiCode.indexOf("&word")+6 )!=-1 ? apiCode.indexOf("&", apiCode.indexOf("&word")+6): apiCode.length )+'%';
+        //return 5 rows that fit the word and are popular: don't really need to check whether word has anything since this just returns events
+        if (apiCode.toLowerCase().indexOf("&page=") == -1) {
+            offset = 0;
+        }
+        if (apiCode.toLowerCase().indexOf("&uni=") == -1) {
+            response.json("missing uni parameter for sort by popularity");
+        }
+        uni = apiCode.substring(apiCode.indexOf("&uni=")+5,apiCode.indexOf("&",apiCode.indexOf("&uni")+5 )!=-1 ? apiCode.indexOf("&", apiCode.indexOf("&uni")+5): apiCode.length );
+        offset = apiCode.substring(apiCode.indexOf("&page=")+6,apiCode.indexOf("&",apiCode.indexOf("&page")+6 )!=-1 ? apiCode.indexOf("&", apiCode.indexOf("&page")+6): apiCode.length ) * 5;
+        var keyWord = '%'+apiCode.substring(apiCode.indexOf("&word=")+6,apiCode.indexOf("&",apiCode.indexOf("&word")+6 )!=-1 ? apiCode.indexOf("&", apiCode.indexOf("&word")+6): apiCode.length )+'%';
         testQuery2 = connection.query("select * from events where uni = ? AND title LIKE ? OR body LIKE ? ORDER BY time DESC LIMIT ?, 5", [ uni, keyWord, keyWord, offset ], function (err, result) {
             console.log(err);
             console.log(testQuery2.sql);
             //response.render('index', {val: err});
-            var json = JSON.stringify(result);
             response.json(result);
             //console.log(json);
         });
     } else if (apiCode.includes("sorttime")) { //sorttime&page=&time=&uni=
         //return 5 rows that are the newest; sort by time
-        time = apiCode.substring(apiCode.indexOf("&time")+6,apiCode.indexOf("&",apiCode.indexOf("&time")+6 )!=-1 ? apiCode.indexOf("&", apiCode.indexOf("&time")+6): apiCode.length );
-        uni = apiCode.substring(apiCode.indexOf("&uni")+5,apiCode.indexOf("&",apiCode.indexOf("&uni")+5 )!=-1 ? apiCode.indexOf("&", apiCode.indexOf("&uni")+5): apiCode.length );
-        offset = apiCode.substring(apiCode.indexOf("&page")+6,apiCode.indexOf("&",apiCode.indexOf("&page")+6 )!=-1 ? apiCode.indexOf("&", apiCode.indexOf("&page")+6): apiCode.length ) * 5;
-            var testQuery2 = connection.query("select * from events where uni = ? AND ABS(time - ?) < 2000 ORDER BY time DESC LIMIT ?, 5", [ uni, time, offset ], function (err, result) {
+        time = apiCode.substring(apiCode.indexOf("&time=")+6,apiCode.indexOf("&",apiCode.indexOf("&time=")+6 )!=-1 ? apiCode.indexOf("&", apiCode.indexOf("&time=")+6): apiCode.length );
+        uni = apiCode.substring(apiCode.indexOf("&uni=")+5,apiCode.indexOf("&",apiCode.indexOf("&uni=")+5 )!=-1 ? apiCode.indexOf("&", apiCode.indexOf("&uni=")+5): apiCode.length );
+        offset = apiCode.substring(apiCode.indexOf("&page=")+6,apiCode.indexOf("&",apiCode.indexOf("&page=")+6 )!=-1 ? apiCode.indexOf("&", apiCode.indexOf("&page=")+6): apiCode.length ) * 5;
+        if (apiCode.toLowerCase().indexOf("&page=") == -1) {
+            offset = 0;
+        }
+        if (apiCode.toLowerCase().indexOf("&time=") == -1) {
+            response.json("missing time parameter for sort by time");
+            return;
+        }
+        if (apiCode.toLowerCase().indexOf("&uni=") == -1) {
+            response.json("missing uni parameter for sort by time");
+            return;
+        }
+
+
+        var testQuery2 = connection.query("select * from events where uni = ? AND ABS(time - ?) < 2000 ORDER BY time DESC LIMIT ?, 5", [ uni, time, offset ], function (err, result) {
             console.log(err);
             //console.log(result[0]);
             //response.render('index', {val: err});
